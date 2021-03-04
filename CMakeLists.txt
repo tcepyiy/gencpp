@@ -8,5 +8,3 @@ install_cmake_infrastructure(gencpp
   VERSION 0.0.1
   CFG_EXTRAS gencpp-extras.cmake
   )
-
-catkin_package(gencpp)
