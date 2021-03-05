@@ -36,66 +36,109 @@
 ## 
 ## Converts ROS .msg files in a package into C++ source code implementations.
 
-import genmsg_cpp
- 
 import sys
 import os
+import em
 
-import genmsg.srvs
 import genmsg.gentools
+import genmsg.command_line
 
-def generate(srv_path, options):
+msg_template_map = { 'msg.h.template':'@NAME@.h' }
+srv_template_map = { 'srv.h.template':'@NAME@.h' }
+
+def generate_from_templates(input_file, msg_context, spec, output_dir, template_dir, template_map):
+
+    md5sum = genmsg.compute_md5(msg_context, spec)
+
+    g = { "file_name_in":input_file,
+          "spec":spec,
+          "md5sum":md5sum}
+
+    for template_file_name, output_file_name in template_map.items():
+        template_file = os.path.join(template_dir, template_file_name)
+        output_file = os.path.join(output_dir, output_file_name.replace("@NAME@", spec.short_name))
+
+        #print "generate_from_template %s %s %s" % (input_file, template_file, output_file) 
+
+        ofile = open(output_file, 'w') #todo try
+        
+        # todo, reuse interpreter
+        interpreter = em.Interpreter(output=ofile, globals=g, options={em.RAW_OPT:True,em.BUFFERED_OPT:True})
+        interpreter.file(open(template_file)) #todo try
+        interpreter.shutdown()
+
+
+def generate(input_file, options):
     """
     Generate a service
     
     @param srv_path: the path to the .srv file
     @type srv_path: str
     """
+    try:
+        os.makedirs(options.outdir)
+    except OSError as e:
+        if e.errno != 17: # file exists
+            raise
 
-    import em
 
-    template_dir = (options.emdir)
-
-    infile = os.path.abspath(srv_path)
+    input_file = os.path.abspath(input_file)
     msg_context = genmsg.msg_loader.MsgContext.create_default()
-    full_type_name = genmsg.gentools.compute_full_type_name(options.package, os.path.basename(infile))
-    print(full_type_name, infile)
-    spec = genmsg.msg_loader.load_srv_from_file(msg_context, infile, full_type_name)
+    full_type_name = genmsg.gentools.compute_full_type_name(options.package, os.path.basename(input_file))
 
-    search_path = genmsg.command_line.includepath_to_dict(options.includepath)
+    if( options.includepath ):
+        search_path = genmsg.command_line.includepath_to_dict(options.includepath)
+    else:
+        search_path = {}
+
+
+    if input_file.endswith(".msg"):
+        spec = genmsg.msg_loader.load_msg_from_file(msg_context, input_file, full_type_name)
+    elif input_file.endswith(".srv"):
+        spec = genmsg.msg_loader.load_srv_from_file(msg_context, input_file, full_type_name)        
+    else:
+        assert False, "Uknown file extension for %s"%input_file
+
     try:
         genmsg.msg_loader.load_depends(msg_context, spec, search_path)
     except genmsg.InvalidMsgSpec as e:
         raise genmsg.MsgGenerationException("Cannot read .msg for %s: %s"%(full_type_name, str(e)))
 
-    out_file_name = os.path.join(options.outdir, spec.short_name + ".h")
-    ofile = open(out_file_name, 'w')
-    print (out_file_name)
+    if input_file.endswith(".msg"):
+        generate_from_templates(input_file,
+                                msg_context,
+                                spec,
+                                options.outdir,
+                                options.emdir,
+                                msg_template_map)
+    elif input_file.endswith(".srv"):
+        generate_from_templates(input_file,
+                                msg_context,
+                                spec,
+                                options.outdir,
+                                options.emdir,
+                                srv_template_map)
+        generate_from_templates(input_file,
+                                msg_context,
+                                spec.request,
+                                options.outdir,
+                                options.emdir,
+                                msg_template_map)
+        generate_from_templates(input_file,
+                                msg_context,
+                                spec.response,
+                                options.outdir,
+                                options.emdir,
+                                msg_template_map)
 
-
-    md5sum = genmsg.compute_md5(msg_context, spec)
-
-    g={ "file_name_in":infile,
-        "spec":spec,
-        "md5sum":md5sum}
-
-    interpreter = em.Interpreter(output=ofile, globals=g, options={"rawErrors_OPT":True})
-    #interpreter.string(template_str)
-    interpreter.file(open(template_dir+'/srv.h.template'))
-    interpreter.shutdown()
-
-    return
-
-def generate_services(argv):
+def generate_cl(argv):
     # print argv
     from optparse import OptionParser
     parser = OptionParser("gencpp_srv.py [options] <srv file>")
     parser.add_option("-p", dest='package',
                       help="package name")
-
     parser.add_option("-o", dest='outdir',
                       help="directory in which to place output files")
-
     parser.add_option("-I", dest='includepath',
                       help="include path to search for messages",
                       action="append")
@@ -112,5 +155,5 @@ def generate_services(argv):
     generate(argv[1], options)
 
 if __name__ == "__main__":
-    generate_services(sys.argv)
+    generate_cl(sys.argv)
     
